@@ -1,3 +1,19 @@
+该项目在开源项目ppp的官方版本ppp2.4.7基础上进行修改以便为pppd程序添加选
+项用于支持额外的附加配置.添加的选项及功能说明如下:
+
+    选项 ifname           字符串参数,指定连接使用的ppp网络接口的名称
+    选项 ip-up-script     字符串参数,指定连接的IPCP协议UP事件脚本路径
+    选项 ip-down-script   字符串参数,指定连接的IPCP协议DOWN事件脚本路径
+    
+ppp项目主项: https://ppp.samba.org/    
+项目于2018年10月11日fork自代码库: https://github.com/paulusmack/ppp
+
+用于修改的大多数代码摘自开源项目opwenwrt的镜像库ppp包补丁相关文件:
+https://github.com/openwrt/openwrt
+
+
+=======================以下说明文字为官方版本原文=======================
+
 This is the README file for ppp-2.4, a package which implements the
 Point-to-Point Protocol (PPP) to provide Internet connections over
 serial lines.
