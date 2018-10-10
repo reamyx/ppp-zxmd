@@ -6,7 +6,7 @@
     
 ppp项目主项: https://ppp.samba.org/   
 项目于2018年10月11日fork自代码库: https://github.com/paulusmack/ppp/
-(该版本已包含"ifname"选项用于指定ppp网络接口名称)
+(该版本已支持"ifname"选项用于指定ppp网络接口名称)
 
 部分功能代码摘自开源项目opwenwrt的镜像库ppp包补丁相关文件:
 https://github.com/openwrt/openwrt
