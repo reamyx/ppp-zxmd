@@ -1958,7 +1958,7 @@ ipcp_up(f)
      */
     if (ipcp_script_state == s_down && ipcp_script_pid == 0) {
 	ipcp_script_state = s_up;
-	ipcp_script(_PATH_IPUP, 0);
+	ipcp_script(path_ipup, 0);
     }
 }
 
@@ -2008,7 +2008,7 @@ ipcp_down(f)
     /* Execute the ip-down script */
     if (ipcp_script_state == s_up && ipcp_script_pid == 0) {
 	ipcp_script_state = s_down;
-	ipcp_script(_PATH_IPDOWN, 0);
+	ipcp_script(path_ipdown, 0);
     }
 }
 
@@ -2062,13 +2062,13 @@ ipcp_script_done(arg)
     case s_up:
 	if (ipcp_fsm[0].state != OPENED) {
 	    ipcp_script_state = s_down;
-	    ipcp_script(_PATH_IPDOWN, 0);
+	    ipcp_script(path_ipdown, 0);
 	}
 	break;
     case s_down:
 	if (ipcp_fsm[0].state == OPENED) {
 	    ipcp_script_state = s_up;
-	    ipcp_script(_PATH_IPUP, 0);
+	    ipcp_script(path_ipup, 0);
 	}
 	break;
     }
