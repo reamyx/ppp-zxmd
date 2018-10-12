@@ -12,7 +12,7 @@ LIBDIR = $(DESTDIR)/lib/pppd/$(VERSION)
 SUBDIRS := rp-pppoe pppoatm pppol2tp
 # Uncomment the next line to include the radius authentication plugin
 SUBDIRS += radius
-PLUGINS := minconn.so passprompt.so passwordfd.so winbind.so
+PLUGINS := minconn.so passprompt.so passwordfd.so winbind.so expandpwd.so extparam.so
 
 # This setting should match the one in ../Makefile.linux
 MPPE=y
