@@ -34,6 +34,8 @@ static option_t provider_options[] = {
     { NULL }
 };
 
+// ipparam传递给扩展程序做参考
+extern char *ipparam;
 
 // ###################################################################################
 
@@ -60,17 +62,17 @@ static int getpwd(char *path, char *user, char *pwresp) {
 	if ((kid = fork()) < 0) {
 		error("Fail to fork to run %s", path);
 		close(p[0]); close(p[1]); return 0; }
-		
+    
 	// 子进程: 执行外部程序并通过父进程的读取管道提供目标数据
 	if (!kid) {
 		// 相关资源初始化,重定向标准输出,
 		close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
 		if(dup2(p[1], 1) < 0) _exit(126); close(p[1]);
-		// 配置参数并运行程序: 用户名称 用户提供的密码或摘要 主进程PID
-		char *argv[6]; argv[0] = path;
-        argv[1] = user; argv[2] = pwresp; argv[3] = mypid; argv[4] = NULL;
+		// 配置参数并运行程序: 用户名称 用户提供的密码或摘要 主进程PID ipparam
+		char *argv[6]; argv[0] = path; argv[1] = user; argv[2] = pwresp;
+        argv[3] = mypid; argv[4] = ipparam; argv[5] = NULL;
 		execv(path, argv); _exit(127); }
-
+    
 	// 主程序: 从管道读取外部程序的标准输出,首行明文密码,次行描述信息
 	close(p[1]);
 	while (readbytes = read(p[0], pwbuff + readok, BFSIZE - readok)) {
@@ -89,14 +91,14 @@ static int getpwd(char *path, char *user, char *pwresp) {
 	while (sp = memchr(pwbuff, '\n', BFSIZE)) *sp = '\0';
 	if ((sp = pwbuff + strlen(pwbuff) + 1) < extdesc) extdesc = sp; return 1; }
 	
-
+    
 // pap认证检查过程 返回值: 1成功 0失败 -1常规pap-secrets检查, 凭据表意明文文本密码
 static int pppd_pap_auth(char *user, char *passwd, char **msgp, 
 	struct wordlist **paddrs, struct wordlist **popts) {
 	// 提取密码成功时执行验证
 	return getpwd(pwdprovider, user, passwd) && strcmp(passwd, pwbuff) == 0; }
 	
-// chap认证检查过程 返回值: 1成功 0失败, 凭据表意明文文本密码
+// chap认证检查过程 返回值: 1成功 0失败
 static int pppd_chap_verify(char *user, char *ourname, int id,
 	struct chap_digest_type *digest,unsigned char *challenge,
 	unsigned char *response, char *message, int message_space) {		
@@ -128,7 +130,7 @@ void plugin_init(void) {
 	chap_check_hook = pppd_chap_check;
 	chap_verify_hook = pppd_chap_verify;
 	//地址配置确认
-	allowed_address_hook = check_address_allowed;}
+	allowed_address_hook = check_address_allowed; }
 
 
 
