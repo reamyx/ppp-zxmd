@@ -1,14 +1,37 @@
 该项目在开源项目ppp的官方版本ppp2.4.7基础上进行修改以便为pppd程序添加选
-项用于支持额外的附加配置.添加的选项及功能说明如下:
+项和插件用于支持额外的附加配置.添加的选项及插件的功能说明如下:
 
-    选项 ip-up-script     字符串参数,指定连接的IPCP协议UP事件脚本路径
-    选项 ip-down-script   字符串参数,指定连接的IPCP协议DOWN事件脚本路径
+选项 ip-up-script
+  
+    字符串参数,指定连接的IPCP协议UP事件脚本路径.
     
-ppp项目主项: https://ppp.samba.org/   
-项目于2018年10月11日fork自代码库: https://github.com/paulusmack/ppp/
+    
+选项 ip-down-script
+    
+    字符串参数,指定连接的IPCP协议DOWN事件脚本路径.
+
+
+插件 expandpwd.so
+    
+    支持同步调用外部程序获取密码数据用于执行对端认证,仅对PAP和CHAP类型认
+    证方法适用,外部程序标准输出首行提供密码,次行提供可选的描述信息,输出
+    内容总限制为256字节.程序本身只需提供密码数据,认证操作将由插件完成.外
+    部程序退出状态非0时直接指示认证失败(账号无效或未能提供密码).
+
+    程序调用参数如下:
+        认证方法("PAP"|"CHAP"), 对端名称,
+        对端密码(仅PAP方法有效,CHAP时置空串), ipparam, pppd进程ID
+
+    插件选项 pwdprovider  字符串参数,指定密码获取程序路径.
+    
+    
+    
+ppp项目主项: https://ppp.samba.org/ 
+  
+项目于2018年10月11日clone自代码库: https://github.com/paulusmack/ppp/
 (该版本已支持"ifname"选项用于指定ppp网络接口名称)
 
-部分功能代码摘自开源项目opwenwrt的镜像库ppp包补丁相关文件:
+脚本路径指定选项的部分代码摘自项目opwenwrt的镜像库ppp包补丁相关文件:
 https://github.com/openwrt/openwrt
 
 

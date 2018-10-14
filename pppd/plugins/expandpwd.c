@@ -4,11 +4,12 @@
  *
  *  Copyright 2018 Reamyx Liou, Xi'an China.
  *
- *  本程序拦截常规pap和chap认证过程,调用外部过程并从标准输出获取认证凭据,同步调用并提
- *  供用户名称作为参考信息,外部过程返回0表示其标准输出首行提供的内容为有效密码数据且次
- *  行为描述字串,否则表示未能提供相关账户的有效凭据,此时标准输出首行为错误描述内容.
- *  插件本身仅执行密码验证过程,账户有效性管理可通过外部过程完成.用户凭据可以是任意可打
- *  印字符序列,由凭据检查过程解释其表意.
+ *  本程序拦截常规pap和chap认证过程,调用外部程序并从标准输出获取认证密码用于对端认证,
+ *  外部程序被同步调用并提供用户名称等作为参考信息,外部过程返回非0表示指定的账户名称
+ *  无效或无法提供有效密码信息,这将直接导致认证失败,否则表示其标准输出首行提供的内容
+ *  为有效密码数据且次行为描述字串,外部密码获取程序本身只需提供密码信息,认证操作将由
+ *  插件完成.
+ *
  * ################################################################################ */
 
 #include <errno.h>
@@ -42,8 +43,7 @@ extern char *ipparam;
 static char pwbuff[BFSIZE+1], *extdesc;
 
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
-static char getpwd(char *path, char *method,
-    char *user, char *challenge, char *pwresp, char *ipparam) {
+static char getpwd(char *path, char *method, char *user, char *ipparam, char *peerpwd) {
 	// 重置数据缓存
 	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE;
 	
@@ -69,8 +69,8 @@ static char getpwd(char *path, char *method,
 		close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
 		if(dup2(p[1], 1) < 0) _exit(126); close(p[1]);
 		// 配置参数并运行程序: 用户名称 用户提供的密码或摘要 主进程PID ipparam
-		char *argv[8]; argv[0] = path; argv[1] = method; argv[2] = user;
-        argv[3] = challenge; argv[4] = pwresp; argv[5] = ipparam; argv[6] = mypid; argv[7] = NULL;
+		char *argv[7]; argv[0] = path; argv[1] = method; argv[2] = user;
+        argv[3] = peerpwd; argv[4] = ipparam; argv[5] = mypid; argv[6] = NULL;
 		execv(path, argv); _exit(127); }
     
 	// 主程序: 从管道读取外部程序的标准输出,首行明文密码,次行描述信息
@@ -96,14 +96,14 @@ static char getpwd(char *path, char *method,
 static int pppd_pap_auth(char *user, char *passwd, char **msgp, 
 	struct wordlist **paddrs, struct wordlist **popts) {
 	// 提取密码成功时执行验证
-	return getpwd(pwdprovider, "PAP", user, "", passwd, ipparam) && strcmp(passwd, pwbuff) == 0; }
+	return getpwd(pwdprovider, "PAP", user, passwd, ipparam) && strcmp(passwd, pwbuff) == 0; }
 	
 // chap认证检查过程 返回值: 1成功 0失败
 static int pppd_chap_verify(char *user, char *ourname, int id,
 	struct chap_digest_type *digest,unsigned char *challenge,
 	unsigned char *response, char *message, int message_space) {
 	// 提取密码成功时执行验证
-	return getpwd(pwdprovider, "CHAP", user, challenge, response, ipparam) && digest->verify_response(
+	return getpwd(pwdprovider, "CHAP", user, "", ipparam) && digest->verify_response(
     id, user, pwbuff, strlen(pwbuff), challenge, response, message, message_space); }
 
 
