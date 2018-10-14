@@ -45,7 +45,7 @@ static char pwbuff[BFSIZE+1], *extdesc;
 static char getpwd(char *path, char *method,
     char *user, char *challenge, char *pwresp, char *ipparam) {
 	// 重置数据缓存
-	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE
+	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE;
 	
 	int p[2], kid, kst, readbytes = 0, readok = 0; char *sp, mypid[IDSIZE+1];
 	
