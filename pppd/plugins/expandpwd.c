@@ -19,8 +19,9 @@
 #include "pppd.h"
 #include "chap-new.h"
 
-// 密码和描述内容返回缓冲区大小
+// 返回密码串缓冲区大小
 #define BFSIZE 256
+#define IDSIZE 16
 
 // 插件适用版本说明
 char pppd_version[] = VERSION;
@@ -34,20 +35,19 @@ static option_t provider_options[] = {
     { NULL }
 };
 
-// ipparam传递给扩展程序做参考
+// ipparam将传递给扩展程序做参考
 extern char *ipparam;
-
-// ###################################################################################
 
 // 外部过程的输出内容存储到全局变量pwbuff,extcrdl和extdesc分别指示凭据信息和描述信息
 static char pwbuff[BFSIZE+1], *extdesc;
 
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
-static int getpwd(char *path, char *user, char *pwresp) {
+static char getpwd(char *path, char *method,
+    char *user, char *challenge, char *pwresp, char *ipparam) {
 	// 重置数据缓存
 	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE
 	
-	int p[2], kid, kst, readbytes = 0, readok = 0; char *sp, mypid[32];
+	int p[2], kid, kst, readbytes = 0, readok = 0; char *sp, mypid[IDSIZE+1];
 	
 	// 路径配置错误(未配置路径或目标不可执行)
 	if (path[0] == 0 || access(path, X_OK) < 0) {
@@ -56,7 +56,7 @@ static int getpwd(char *path, char *user, char *pwresp) {
 	if (pipe(p)) {error("Fail to create a pipe for %s", path); return 0; }
 	
 	// 获取当前进程PID的字符串形式准备传递到脚本
-	memset(mypid, 0, CTLIDL+1); sprintf(mypid, "%d", getpid());
+	memset(mypid, 0, IDSIZE+1); sprintf(mypid, "%d", getpid());
 	
 	// FORK子进程失败
 	if ((kid = fork()) < 0) {
@@ -69,8 +69,8 @@ static int getpwd(char *path, char *user, char *pwresp) {
 		close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
 		if(dup2(p[1], 1) < 0) _exit(126); close(p[1]);
 		// 配置参数并运行程序: 用户名称 用户提供的密码或摘要 主进程PID ipparam
-		char *argv[6]; argv[0] = path; argv[1] = user; argv[2] = pwresp;
-        argv[3] = mypid; argv[4] = ipparam; argv[5] = NULL;
+		char *argv[8]; argv[0] = path; argv[1] = method; argv[2] = user;
+        argv[3] = challenge; argv[4] = pwresp; argv[5] = ipparam; argv[6] = mypid; argv[7] = NULL;
 		execv(path, argv); _exit(127); }
     
 	// 主程序: 从管道读取外部程序的标准输出,首行明文密码,次行描述信息
@@ -96,14 +96,14 @@ static int getpwd(char *path, char *user, char *pwresp) {
 static int pppd_pap_auth(char *user, char *passwd, char **msgp, 
 	struct wordlist **paddrs, struct wordlist **popts) {
 	// 提取密码成功时执行验证
-	return getpwd(pwdprovider, user, passwd) && strcmp(passwd, pwbuff) == 0; }
+	return getpwd(pwdprovider, "PAP", user, "", passwd, ipparam) && strcmp(passwd, pwbuff) == 0; }
 	
 // chap认证检查过程 返回值: 1成功 0失败
 static int pppd_chap_verify(char *user, char *ourname, int id,
 	struct chap_digest_type *digest,unsigned char *challenge,
-	unsigned char *response, char *message, int message_space) {		
+	unsigned char *response, char *message, int message_space) {
 	// 提取密码成功时执行验证
-	return getpwd(pwdprovider, user, response) && digest->verify_response(
+	return getpwd(pwdprovider, "CHAP", user, challenge, response, ipparam) && digest->verify_response(
     id, user, pwbuff, strlen(pwbuff), challenge, response, message, message_space); }
 
 

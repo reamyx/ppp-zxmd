@@ -23,5 +23,11 @@ passprompt.so: passprompt.o
 passprompt.o: passprompt.c
 	$(CC) $(CFLAGS) -c $?
 
+expandpwd.so: expandpwd.o
+	ld -o $@ $(LDFLAGS) -h $@ expandpwd.o
+
+expandpwd.o: expandpwd.c
+	$(CC) $(CFLAGS) -c $?
+
 clean:
 	rm -f *.o *.so
