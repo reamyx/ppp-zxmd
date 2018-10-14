@@ -43,7 +43,7 @@ extern char *ipparam;
 static char pwbuff[BFSIZE+1], *extdesc;
 
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
-static char getpwd(char *path, char *method, char *user, char *ipparam, char *peerpwd) {
+static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ipparam) {
 	// 重置数据缓存
 	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE;
 	
