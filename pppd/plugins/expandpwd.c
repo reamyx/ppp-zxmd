@@ -45,6 +45,7 @@ static char pwbuff[BFSIZE+1], *extdesc;
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
 static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ipparam) {
 	int p[2], kid, kst, readbytes = 0, readok = 0; char *sp, mypid[IDSIZE+1];
+    void (*khd)(int) = NULL;
     
 	// 重置数据缓存,获取进程PID的字串
 	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE;	
@@ -56,6 +57,7 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
 	if (pipe(p)) {error("Fail to create a pipe for %s", path); return 0; }
 	
 	// FORK子进程
+    khd = signal(SIGCHLD, SIG_DFL);
 	if ((kid = fork()) < 0) {
 		error("Fail to fork to run %s", path); close(p[0]); close(p[1]); return 0; }
     
@@ -80,6 +82,7 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
     // 等待子进程终止并获取退出状态码
     while (waitpid(kid, &kst, 0) < 0)
 		if (errno != EINTR) { error("Error waiting for %s.", path); return 0; }
+    signal(SIGCHLD, khd);
     
 	// 子程序异常终止或返回非0时返回错误
 	if (WIFSIGNALED(kst)) {
