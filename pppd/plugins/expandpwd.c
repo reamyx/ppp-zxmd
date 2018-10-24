@@ -86,9 +86,9 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
     
 	// 子程序异常终止或返回非0时返回错误
 	if (WIFSIGNALED(kst)) {
-        snprintf(emsg, emsglen, "Expand program exception terminated."); return 0;}
+        error("Expand program exception terminated with singnal %u", WTERMSIG(status)); return 0; }
     if (WEXITSTATUS(kst)) {
-        snprintf(emsg, emsglen, "Expand program exit whit code: %u", WEXITSTATUS(kst)); return 0;}
+        error("Expand program exit whit code: %u", WEXITSTATUS(kst)); return 0; }
     
 	// 成功获取密码数据时进行字串分离('\n'转换为'\0)
 	while (sp = memchr(pwbuff, '\n', BFSIZE)) *sp = '\0';
