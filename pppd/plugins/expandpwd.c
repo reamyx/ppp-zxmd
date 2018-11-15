@@ -21,8 +21,11 @@
 #include "chap-new.h"
 
 // 返回密码串缓冲区大小
-#define BFSIZE 256
-#define IDSIZE 16
+#define BFSIZE 255
+#define PMSIZE 1023
+#define UUIDSZ 39
+#define UUIDFL "/proc/sys/kernel/random/uuid"
+#define UUIDCM "uuidgen"
 
 // 插件适用版本说明
 char pppd_version[] = VERSION;
@@ -36,20 +39,20 @@ static option_t provider_options[] = {
     { NULL }
 };
 
-// ipparam将传递给扩展程序做参考
-extern char *ipparam;
+// ipparam将传递给扩展程序
+extern char *ipparam, our_name[];
 
-// 外部过程的输出内容存储到全局变量pwbuff,extcrdl和extdesc分别指示凭据信息和描述信息
-static char pwbuff[BFSIZE+1], *extdesc;
+// 外部过程的输出内容存储到*pwbuff,其与extdesc分别指示密码和描述串
+// asessid为用于关联认证和IPCP脚本的会话ID,uuidfl,uuidgen指示UUID生成相关文件或命令
+static char pwbuff[BFSIZE+1], *extdesc, asessid[UUIDSZ+1];
 
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
 static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ipparam) {
-	int p[2], kid, kst, readbytes = 0, readok = 0; char *sp, mypid[IDSIZE+1];
-    void (*khd)(int) = NULL;
-    
+	int p[2], kid, kst, readbytes = 0, readok = 0
+    char *sp, *parm[PMSIZE+1], *argv[3]; void (*khd)(int) = NULL;
 	// 重置数据缓存,获取进程PID的字串
-	memset(pwbuff, 0, BFSIZE+1); extdesc = pwbuff + BFSIZE;	
-	memset(mypid,  0, IDSIZE+1); snprintf(mypid, sizeof(mypid),"%u", getpid());   
+	memset(pwbuff, '\0', sizeof(pwbuff)); extdesc = pwbuff + BFSIZE;	
+	memset(parm,  '\0', sizeof(parm));
     
 	// 路径配置错误(未配置路径或目标不可执行),管道资源错误
 	if (path[0] == 0 || access(path, X_OK) < 0) {
@@ -66,11 +69,19 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
 		// 相关资源初始化,重定向标准输出,
 		close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
 		if(dup2(p[1], 1) < 0) _exit(126); close(p[1]);
-		// 配置参数并运行程序: 用户名称 用户提供的密码或摘要 主进程PID ipparam
-		char *argv[7]; argv[0] = path; argv[1] = method; argv[2] = user;
-        argv[3] = peerpwd; argv[4] = ipparam; argv[5] = mypid; argv[6] = NULL;
+		// 构造JSON格式的参数并运行外部程序
+        snprintf(parm, sizeof(parm),
+            "{ %s%s%s, %s%s%s, %s%s%s, %s%s%s, %s%u%s, %s%s%s, %s%s%s, }",
+            "\"method\": \"",    method,    "\"",
+            "\"usercnm\": \"",   user,      "\"",
+            "\"usercpw\": \"",   peerpwd,   "\"",
+            "\"ipparm\": \"",    ipparam,   "\"",
+            "\"srvpid\": \"",    getpid(),  "\"",
+            "\"asessid\": \"",   asessid,   "\"",
+            "\"srvname\": \"",   our_name,  "\"");
+		argv[0] = path; argv[1] = parm; argv[2] = NULL;
 		execv(path, argv); _exit(127); }
-    
+        
 	// 主程序: 从管道读取外部程序的标准输出,首行明文密码,次行描述信息
 	close(p[1]);
 	while (readbytes = read(p[0], pwbuff + readok, BFSIZE - readok)) {
@@ -109,7 +120,22 @@ static int pppd_chap_verify(char *user, char *ourname, int id,
 	return getpwd(pwdprovider, "CHAP", user, "", ipparam) && digest->verify_response(
     id, user, pwbuff, strlen(pwbuff), challenge, response, message, message_space); }
 
-
+    
+// 使用linux提供的功能生成UUID字串并格式化,失败时返回NULL
+char *get_ssuuid(char *bfp, size_t bflen) {
+    char *sp, *tp, *mp = bfp, uuid[UUIDSZ+1], uuidfl[] = UUIDFL, uuidcm[]= UUIDCM;
+    FILE *fp, *knl; memset(uuid, '\0', sizeof(uuid)); memset(bfp, '\0', bflen);
+    // 尝试读取kernel相关文件或执行系统命令生成UUID串
+    if ((knl = fp = fopen(uuidfl, "r")) || (fp = popen(uuidcm, "r"))) {
+        fgets(uuid, sizeof(uuid), fp); knl ? fclose(fp) : pclose(fp); }
+    // 执行字串格式化后作为ppp连接会话ID安全复制到缓存区
+    while (sp = memchr(uuid, '\n', ASSIZE)) *sp = '\0';
+    while (sp = memchr(uuid, '-',  ASSIZE)) *sp = '\0';
+    for (sp = uuid, tp = uuid + sizeof(uuid); sp++; sp < tp;) {
+        if (*sp == '\0') continue; if (mp >= bfp + bflen) break; *mp++ = *sp; }
+    *(bfp+bflen-1) = '\0'; return *bfp ? bfp : NULL; }
+    
+    
 // ###################################################################################
 
 
@@ -124,6 +150,8 @@ static int check_address_allowed(unsigned int addr) { return 1; }
 
 // 插件: 功能注册
 void plugin_init(void) {
+    //初始化会话ID
+    get_ssuuid(asessid, sizeof(asessid));
 	//选项注册,返回时选项值并未完成解析,将在此后某个阶段执行解析
 	add_options(provider_options);
 	//PAP认证注册
