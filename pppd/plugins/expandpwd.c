@@ -75,13 +75,13 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
         script_setenv("SRV_NAME", our_name, 0);
         script_setenv("SESS_UUID", asessid, 0); ssidinit = 0; }
     // 路径配置错误(未配置路径或目标不可执行),管道资源错误
-    if (path[0] == 0 || access(path, X_OK) < 0) {
-        error("External program path config error: %s", path); return 0; }
+    if (access(path, X_OK) < 0) {
+        error("External program execute error: %s", path); return 0; }
     if (pipe(p)) { error("Fail to create a pipe for %s", path); return 0; }
     // SIGCHLD信号临时恢复,FORK子进程
     khd = signal(SIGCHLD, SIG_DFL);
     if ((kid = fork()) < 0) {
-        error("Fail to fork to run %s", path); close(p[0]); close(p[1]); return 0; }
+        error("Failed to fork to run %s", path); close(p[0]); close(p[1]); return 0; }
     // 子进程: 执行外部程序并通过父进程的读取管道提供目标数据
     if (!kid) {
         close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
