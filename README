@@ -2,10 +2,10 @@
 项和插件用于支持额外的附加配置.添加的选项及插件的功能说明如下:
 
 选项 ip-up-script
-  
+    
     字符串参数,指定连接的IPCP协议UP事件脚本路径.
-    
-    
+
+
 选项 ip-down-script
     
     字符串参数,指定连接的IPCP协议DOWN事件脚本路径.
@@ -13,28 +13,38 @@
 
 插件 expandpwd.so
     
-    支持同步调用外部程序获取密码数据用于执行对端认证,仅对PAP和CHAP类型认
+    支持同步调用外部程序查询密码数据用于执行对端认证,仅对PAP和CHAP类型认
     证方法适用,外部程序标准输出首行提供密码,次行提供可选的描述信息,输出
-    内容总限制为256字节.程序本身只需提供密码数据,认证操作将由插件完成.外
+    内容总限制为2047字节.程序本身只需提供密码数据,认证操作将由插件完成.外
     部程序退出状态非0时直接指示认证失败(账号无效或未能提供密码).
+    
+    若期望的认证过程被执行,插件还将添加环境变量"SSES_UUID"到IPCP脚本,其内
+    容是一个UUID字串,用于关联认证信息查询过程(包括后继的)和IPCP脚本实例.
+    
+    插件选项 pwdprovider  字符串参数,指定外部密码查询程序路径.    
+    
+    外部程序调用参数"$1"为单个JSON对象表达字串,示例如下:
+    
+    { "method": "CHAP", "usercnm": "abc000", "usercpw": "xxx",
+      "ipparm": "xxx", "srvpid": "2233", "srvname": "PPTP",
+      "asessid": "3C1C418D34AE480AB703355E0C5C8C50" }
+    
+    参数内容(JSON对象属性)解释:
+        method    认证方法: "PAP", "CHAP"
+        usercnm   对端认证名称
+        usercpw   对端提交的密码明文,仅PAP方法时适用
+        ipparm    pppd程序之ipparm选项值
+        srvpid    pppd进程PID
+        asessid   认证查询关联的UUID字串(IPCP脚本环境变量"SSES_UUID")
+        srvname   服务名称,pppd程序之name选项值
 
-    程序调用参数如下:
-        认证方法("PAP"|"CHAP"), 对端名称,
-        对端密码(仅PAP方法有效,CHAP时置空串), ipparam, pppd进程ID
-
-    插件选项 pwdprovider  字符串参数,指定密码获取程序路径.
-    
-    
-    
 ppp项目主项: https://ppp.samba.org/ 
-  
+
 项目于2018年10月11日clone自代码库: https://github.com/paulusmack/ppp/
 (该版本已支持"ifname"选项用于指定ppp网络接口名称)
 
 脚本路径指定选项的部分代码摘自项目opwenwrt的镜像库ppp包补丁相关文件:
 https://github.com/openwrt/openwrt
-
-
 
 =======================以下说明文字为官方版本原文=======================
 

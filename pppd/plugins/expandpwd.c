@@ -1,15 +1,26 @@
 /* ###################################################################################
  *
- *  expandpwd.c - pppd用户密码获取扩展,调用外部程序获取pap和chap认证密码
+ *  expandpwd.c - pppd用户密码查询扩展,调用外部程序获取pap和chap认证密码
  *
- *  Copyright 2018 Reamyx Liou, Xi'an China.
+ *  Copyright 2018 Reamyx Liou, Xi'an in China.
  *
- *  本程序拦截常规pap和chap认证过程,调用外部程序并从标准输出获取认证密码用于对端认证,
+ *  本程序拦截常规pap和chap认证过程,调用外部程序并从标准输出查询认证密码用于对端认证,
  *  外部程序被同步调用并提供用户名称等作为参考信息,外部过程返回非0表示指定的账户名称
  *  无效或无法提供有效密码信息,这将直接导致认证失败,否则表示其标准输出首行提供的内容
  *  为有效密码数据且次行为描述字串,外部密码获取程序本身只需提供密码信息,认证操作将由
  *  插件完成.
  *
+ *  若期望的认证过程被执行,插件还将添加环境变量"SSES_UUID"到IPCP脚本,其内容是一个UUID
+ *  字串,用于关联认证信息查询过程(包括后继的)和IPCP脚本实例.
+ *
+ *  外部程序调用参数"$1"为单个JSON对象表达字串,参数内容(JSON对象属性)解释:
+ *  method    认证方法: "PAP", "CHAP"
+ *  usercnm   对端认证名称
+ *  usercpw   对端提交的密码明文,仅PAP方法时适用
+ *  ipparm    pppd程序之ipparm选项值
+ *  srvpid    pppd进程PID
+ *  asessid   认证查询关联的UUID字串(IPCP脚本环境变量"SSES_UUID")
+ *  srvname   服务名称,pppd程序之name选项值
  * ################################################################################ */
 
 #include <errno.h>
@@ -28,10 +39,10 @@
 #define UUIDFL "/proc/sys/kernel/random/uuid"
 #define UUIDCM "uuidgen"
 
-// 插件适用版本说明
+// 插件适用版本
 char pppd_version[] = VERSION;
 
-// 选项定义: pwdprovider,提供凭据信息的外部程序路径
+// 选项定义: pwdprovider,提供外部查询程序路径
 static char pwdprovider[PATH_MAX+1];
 static option_t provider_options[] = {
     { "pwdprovider", o_string, pwdprovider,
@@ -40,7 +51,7 @@ static option_t provider_options[] = {
     { NULL }
 };
 
-// ipparam将传递给扩展程序
+// ipparam选项和name选项将传递给扩展程序
 extern char *ipparam, our_name[MAXNAMELEN];
 
 static int str_get_uuid(char *, size_t);
@@ -50,14 +61,14 @@ static int str_tm_sncp(char *, size_t, char *, char);
 // asessid为用于关联认证和IPCP脚本的会话ID,uuidfl,uuidgen指示UUID生成相关文件或命令
 static char pwbuff[BFSIZE+1], *extdesc, asessid[UUIDSZ+1], ssidinit = 1;
 
-// 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
+// 外部密码查询过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
 static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ipparam) {
-    int p[2], kid, kst, readbytes = 0, readok = 0; void (*khd)(int) = NULL;
+    int p[2], kid, kst, pid, readbytes = 0, readok = 0; void (*khd)(int) = NULL;
     char *argv[3], *sp, parm[PMSIZE+1], j_method[UUIDSZ*2], j_user[MAXNAMELEN*2], 
          j_peerpwd[MAXSECRETLEN*2], j_ipparam[PMSIZE+1], j_srvname[MAXNAMELEN*2];
     // 重置数据缓存
-    memset(pwbuff, '\0', sizeof(pwbuff)); extdesc = pwbuff + BFSIZE;    
-    memset(parm,  '\0', sizeof(parm));
+    memset(pwbuff, '\0', sizeof(pwbuff)); extdesc = pwbuff + BFSIZE;
+    memset(parm, '\0', sizeof(parm)); pid = getpid();
     //初始化会话ID,配置脚本环境变量,仅首次配置即可 script_unsetenv("SESS_UUID");
     if (ssidinit) {
         str_get_uuid(asessid, sizeof(asessid));
@@ -87,7 +98,7 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
             "\"usercnm\": \"",   j_user,      "\"",
             "\"usercpw\": \"",   j_peerpwd,   "\"",
             "\"ipparm\": \"",    j_ipparam,   "\"",
-            "\"srvpid\": \"",    getpid(),    "\"",
+            "\"srvpid\": \"",    pid,         "\"",
             "\"asessid\": \"",   asessid,     "\"",
             "\"srvname\": \"",   j_srvname,   "\"");
         argv[0] = path; argv[1] = parm; argv[2] = NULL;
@@ -148,8 +159,6 @@ static int str_tm_sncp(char *dst, size_t dstlen, char * src, char sc) {
     while (*sp && dp < tdp) *dp++ = (*sp == sc && tm)?(tm = '\0', '\\'):(tm = *sp++);
     if (dp == tdp) dp--; *dp = '\0'; return (int)(dp-dst); }
 
-// #########################################################################################
-
 
 // 返回对端pap认证确认 1认证 0不认证 -1常规pap-secrets文件认证
 static int pppd_pap_check(void) { return 1; }
@@ -159,6 +168,7 @@ static int pppd_chap_check(void) { return 1; }
 
 // 返回对端地址确认: 1允许 0拒绝 -1常规处理
 static int check_address_allowed(unsigned int addr) { return 1; }
+
 
 // 插件: 功能注册
 void plugin_init(void) {
