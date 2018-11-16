@@ -17,12 +17,13 @@
 #include <sys/wait.h>
 #include <syslog.h>
 #include <string.h>
+#include <ctype.h>
 #include "pppd.h"
 #include "chap-new.h"
 
 // 返回密码串缓冲区大小
 #define BFSIZE 255
-#define PMSIZE 1023
+#define PMSIZE 2047
 #define UUIDSZ 39
 #define UUIDFL "/proc/sys/kernel/random/uuid"
 #define UUIDCM "uuidgen"
@@ -42,7 +43,8 @@ static option_t provider_options[] = {
 // ipparam将传递给扩展程序
 extern char *ipparam, our_name[MAXNAMELEN];
 
-char *get_ssuuid(char *, size_t);
+static int str_get_uuid(char *, size_t);
+static int str_tm_sncp(char *, size_t, char *, char);
 
 // 外部过程的输出内容存储到*pwbuff,其与extdesc分别指示密码和描述串
 // asessid为用于关联认证和IPCP脚本的会话ID,uuidfl,uuidgen指示UUID生成相关文件或命令
@@ -50,21 +52,22 @@ static char pwbuff[BFSIZE+1], *extdesc, asessid[UUIDSZ+1], ssidinit = 1;
 
 // 凭据提取过程,返回值为非0时指示目标凭据有效,0则无效或过程异常
 static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ipparam) {
-    int p[2], kid, kst, readbytes = 0, readok = 0
-    char *sp, *parm[PMSIZE+1], *argv[3]; void (*khd)(int) = NULL;
+    int p[2], kid, kst, readbytes = 0, readok = 0; void (*khd)(int) = NULL;
+    char *argv[3], *sp, parm[PMSIZE+1], j_method[UUIDSZ*2], j_user[MAXNAMELEN*2], 
+         j_peerpwd[MAXSECRETLEN*2], j_ipparam[PMSIZE+1], j_srvname[MAXNAMELEN*2];
     // 重置数据缓存
     memset(pwbuff, '\0', sizeof(pwbuff)); extdesc = pwbuff + BFSIZE;    
     memset(parm,  '\0', sizeof(parm));
     //初始化会话ID,配置脚本环境变量,仅首次配置即可 script_unsetenv("SESS_UUID");
     if (ssidinit) {
-        get_ssuuid(asessid, sizeof(asessid));
+        str_get_uuid(asessid, sizeof(asessid));
         script_setenv("SRV_NAME", our_name, 0);
         script_setenv("SESS_UUID", asessid, 0); ssidinit = 0; }
     // 路径配置错误(未配置路径或目标不可执行),管道资源错误
     if (path[0] == 0 || access(path, X_OK) < 0) {
         error("External program path config error: %s", path); return 0; }
     if (pipe(p)) { error("Fail to create a pipe for %s", path); return 0; }
-    // FORK子进程
+    // SIGCHLD信号临时恢复,FORK子进程
     khd = signal(SIGCHLD, SIG_DFL);
     if ((kid = fork()) < 0) {
         error("Fail to fork to run %s", path); close(p[0]); close(p[1]); return 0; }
@@ -73,15 +76,20 @@ static char getpwd(char *path, char *method, char *user, char *peerpwd, char *ip
         close(p[0]); sys_close(); closelog(); seteuid(getuid()); setegid(getgid());
         if(dup2(p[1], 1) < 0) _exit(126); close(p[1]);
         // 构造JSON格式的参数递交至外部程序
+        str_tm_sncp(j_method,  sizeof(j_method),  method,   '\"');
+        str_tm_sncp(j_user,    sizeof(j_user),    user,     '\"');
+        str_tm_sncp(j_peerpwd, sizeof(j_peerpwd), peerpwd,  '\"');
+        str_tm_sncp(j_ipparam, sizeof(j_ipparam), ipparam,  '\"');
+        str_tm_sncp(j_srvname, sizeof(j_srvname), our_name, '\"');
         snprintf(parm, sizeof(parm),
             "{ %s%s%s, %s%s%s, %s%s%s, %s%s%s, %s%u%s, %s%s%s, %s%s%s }",
-            "\"method\": \"",    method,    "\"",
-            "\"usercnm\": \"",   user,      "\"",
-            "\"usercpw\": \"",   peerpwd,   "\"",
-            "\"ipparm\": \"",    ipparam,   "\"",
-            "\"srvpid\": \"",    getpid(),  "\"",
-            "\"asessid\": \"",   asessid,   "\"",
-            "\"srvname\": \"",   our_name,  "\"");
+            "\"method\": \"",    j_method,    "\"",
+            "\"usercnm\": \"",   j_user,      "\"",
+            "\"usercpw\": \"",   j_peerpwd,   "\"",
+            "\"ipparm\": \"",    j_ipparam,   "\"",
+            "\"srvpid\": \"",    getpid(),    "\"",
+            "\"asessid\": \"",   asessid,     "\"",
+            "\"srvname\": \"",   j_srvname,   "\"");
         argv[0] = path; argv[1] = parm; argv[2] = NULL;
         execv(path, argv); _exit(127); }
     // 主程序: 从管道读取外部程序的标准输出,首行明文密码,次行描述信息
@@ -118,22 +126,29 @@ static int pppd_chap_verify(char *user, char *ourname, int id,
     return getpwd(pwdprovider, "CHAP", user, "", ipparam) && digest->verify_response(
     id, user, pwbuff, strlen(pwbuff), challenge, response, message, message_space); }
 
-    
-// 使用linux提供的功能生成UUID字串并格式化,失败时返回NULL
-char *get_ssuuid(char *bfp, size_t bflen) {
-    char *sp, *tp, *mp = bfp, uuid[UUIDSZ+1], uuidfl[] = UUIDFL, uuidcm[]= UUIDCM;
-    FILE *fp, *knl; memset(uuid, '\0', sizeof(uuid)); memset(bfp, '\0', bflen);
+// 通过内核或命令生成UUID字串,格式化并安全复制到目标区,返回目标串长度或-1
+static int str_get_uuid(char *dst, size_t dstlen) {
+    if (dstlen < 1) return -1;
+    char uuid[UUIDSZ+1], uuidfl[] = UUIDFL, uuidcm[]= UUIDCM,
+         *sp, *tsp = uuid + sizeof(uuid), *dp = dst, *tdp = dst + dstlen;
+    FILE *fp, *knl; memset(uuid, '\0', sizeof(uuid)); memset(dst, '\0', dstlen);
     // 尝试读取kernel相关文件或执行系统命令生成UUID串
     if ((knl = fp = fopen(uuidfl, "r")) || (fp = popen(uuidcm, "r"))) {
         fgets(uuid, sizeof(uuid), fp); knl ? fclose(fp) : pclose(fp); }
-    // 执行字串格式化后作为ppp连接会话ID安全复制到缓存区
+    // 执行字串格式化(清除换行和连接符)后安全复制到缓存区
     while (sp = memchr(uuid, '\n', sizeof(uuid))) *sp = '\0';
     while (sp = memchr(uuid, '-',  sizeof(uuid))) *sp = '\0';
-    for (sp = uuid, tp = uuid + sizeof(uuid); sp++; sp < tp) {
-        if (*sp == '\0') continue; if (mp >= bfp + bflen) break; *mp++ = *sp; }
-    *(bfp+bflen-1) = '\0'; return *bfp ? bfp : NULL; }
+    for (sp = uuid; sp < tsp && dp < tdp; sp++) if (*sp) *dp++ = toupper(*sp);
+    if (dp == tdp) dp--; *dp = '\0'; return (int)(dp-dst); }
 
-// ###################################################################################
+// 将源字符串安全复制到目标区域并对指定字符添加转义符,返回目标串长度或-1
+static int str_tm_sncp(char *dst, size_t dstlen, char * src, char sc) {
+    if (dstlen < 1) return -1; memset(dst, '\0', dstlen);
+    char tm = 'A', *dp = dst, *tdp = dst + dstlen, *sp = src;
+    while (*sp && dp < tdp) *dp++ = (*sp == sc && tm)?(tm = '\0', '\\'):(tm = *sp++);
+    if (dp == tdp) dp--; *dp = '\0'; return (int)(dp-dst); }
+
+// #########################################################################################
 
 
 // 返回对端pap认证确认 1认证 0不认证 -1常规pap-secrets文件认证
